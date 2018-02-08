@@ -150,10 +150,10 @@ def ShowAllSource():
     else:
         print('\n->  Current Sources table content:'
               '\nID, TYPE (1 - chat, 2 - channel), SOURCE (ID), STATE (1 - after /save, 2 - after /delay, '
-              '3 - after /remind) LANG (language):')
+              '3 - after /remind), LANG (language), TZONE (time zone):')
         for source in sources:
             print(str(source[0]) + '  ' + str(source[1]) + '  ' + str(source[2]) + '  ' + str(source[3]) + '  '
-                  + str(source[4]))
+                  + str(source[4]) + str(source[5]))
 
         return 0
 
@@ -167,11 +167,11 @@ def ShowAllNotes():
         return 1
     else:
         print('\n->  Current Notes table content:'
-              '\nID, SOURCE (ID), YEAR.MONTH.DAY HOUR:MINUTE, TEXT, REMINDED (0 - no, 1 - yes):')
+              '\nID, SOURCE (ID), YEAR.MONTH.DAY HOUR:MINUTE, TZONE, REMINDED (0 - no, 1 - yes), TEXT:')
         for note in notes:
             print(str(note[0]) + '  ' + str(note[1]) + '  ' + str(note[2]) + '.' + str(note[3]) + '.'
                   + str(note[4]) + ' ' + str(note[5]) + ':' + str(note[6]) + '  ' + str(note[7]) + '  '
-                  + str(note[8]))
+                  + str(note[9]) + '  ' + str(note[8]))
         return 0
 
 
@@ -233,8 +233,9 @@ def RunCycleTimerAction():
     global bot_token, curr_update_num
     # CALCULATING SERVER UTC OFFSET
     ts = time.time()
-    utc_offset = str(round((datetime.fromtimestamp(ts) -
-                  datetime.utcfromtimestamp(ts)).total_seconds()/3600))
+    server_timezone = round((datetime.fromtimestamp(ts) -
+                  datetime.utcfromtimestamp(ts)).total_seconds()/3600)
+    utc_offset = str(server_timezone)
     if utc_offset[0] != '-':
         utc_offset = '+' + utc_offset
 
@@ -263,9 +264,11 @@ def RunCycleTimerAction():
     db_connection = ReminderBotCSQL.ConnectToDB(db_filename, None)
     # PREPARING MESSAGES ON TWO LANGUAGES
     help_message = ('Hi, I am the <b>reminder bot</b>! And I am at your service. Note, that '
-                    'my UTC time offset is ' + utc_offset + '\n'
+                    'my UTC time offset is ' + utc_offset + ', so, please, '
+                    'tell me your time zone via a command below.\n'
                     'You can send me next commands:\n'
                     '/help - for getting this help message,\n'
+                    '/timezone - to tell me your actual time zone,\n'
                     '/show - to see all your notes I still remember,\n'
                     '/remind - to save a note that I will remind after entered period of time,\n'
                     '/save - to save a note that I will remind you at specified time (take into '
@@ -273,15 +276,30 @@ def RunCycleTimerAction():
                     '/delay - to delay last note reminded by me not longer ago then 30 min.\n'
                     'You can type that commands manually without "/" symbol.',
                     'Привет, я - <b>reminder bot</b> (бот для напоминаний)! И я к Вашим услугам.\n'
-                    'Обратите внимание, что мой часовой пояс ' + utc_offset + '\n'
+                    'Обратите внимание, что мой часовой пояс ' + utc_offset + ', так что, пожалуйста, '
+                    'сообщите мне Ваш часовой пояс командой, описанной далее.\n'
                     'Вы можете использовать следующие комманды:\n'
                     '/help - чтобы получить данное информационное сообщение,\n'
+                    '/timezone - чтобы сообщить мне Ваш часовой пояс,\n'
                     '/show - чтобы увидеть, какие Ваши памятки я еще помню,\n'
                     '/remind - чтобы сохранить памятку, которую я напомню через заданное время,\n'
                     '/save - чтобы сохранить памятку, которую я напомню в определенное время ('
                     'учтите мой часовой пояс),\n'
                     '/delay - чтобы отложить памятку, которую я напомнил не далее, чем 30 минут назад.\n'
                     'Вы также можете ввести эти команды вручную без символа "/".')
+
+    timezone_message = ('I know your current time zone to be %s. If it is not actual, enter your actual time zone, '
+                        'for example, "-5" if you are in New-York or "3" if in Moscow.',
+                        'Насколько я знаю, Ваш часовой пояс %s. Если это не так, введите Ваш актуальный часовой пояс, '
+                        'например, "-5" если Вы в Нью-Йорке или "3" - если в Москве.')
+
+    timezone_invalid_message = ('Invalid input. Please, try again and enter your time zone, a number from -12 to 13, '
+                                'or any other command, like /help, to abort.',
+                                'Неверное значение. Пожалуйста, попробуйте еще раз ввести Ваш часовой пояс, число от'
+                                '-12 до 13, или любую другую комманду, например, /help, для отмены.')
+
+    timezone_success_message = ('Your time zone has been updated successfully.',
+                                'Ваш часовой пояс обновлен успешно.')
 
     show_nosaved_message = ('You have no saved not-reminded notes to show. '
                             'Use /help to get help with list of all commands.',
@@ -290,7 +308,7 @@ def RunCycleTimerAction():
 
     show_saved_message = ('Your saved notes are:', 'Ваши сохраненные памятки:')
 
-    show_reminded_message = (' (reminded)', ' (уже напомненное)')
+    show_reminded_message = (' (reminded)', ' (уже напомнено)')
 
     remind_message = ('Enter the note to remind in format:\n<i>minutes hours days months years note_text</i>\n'
                       'where minutes, hour and up to year - are number parameters (1-2 digits), that can be '
@@ -303,7 +321,7 @@ def RunCycleTimerAction():
                       '<i>минуты часы дни месяцы годы текст_памятки</i>\n'
                       'где минуты, часы и так до годов - числовые параметры (1-2 цифры), которые могут быть '
                       'опущены начиная с конца, кроме минут,\n'
-                      'длинна текста должна быть не менее 3 символов.\n'
+                      'длина текста должна быть не менее 3 символов.\n'
                       'Пример: "15 2 Позвонить маме" - напомнит Вам позвонить маме через 2 часа и 15 минут,\n'
                       'Пример: "0 0 0 1 1 Заменить права" - напомнит Вам заменить права через 1 год и 1 месяц.')
 
@@ -335,7 +353,7 @@ def RunCycleTimerAction():
                     'ДД - 2 цифры дня\n'
                     'чч - 2 цифры часа\n'
                     'мм - 2 цифры минут.\n'
-                    'Длинна текста должна быть не менее 3 символов.\n'
+                    'Длина текста должна быть не менее 3 символов.\n'
                     'Пример: "2018.08.16 15:20 Финальная игра"')
 
     save_invalid_message = ('The entered note does not match the format: <i>YYYY.MM.DD hh:mm note_text</i> or <i>hh:mm '
@@ -354,12 +372,6 @@ def RunCycleTimerAction():
                               'try again. You can use /save to see the description of format or /help for help.',
                               'Текст Вашей памятки слишком коротки (меньше 3 символов). Пожалуйста, '
                               'попробуйте еще раз. Вы можете использовать команду /save для получения описания формата '
-                              'или /help для получения списка доступных команд.')
-
-    delay_norecent_message = ('You have no recently reminded note to delay (no notes where reminded last 30 minutes). '
-                              'Use /save command first to save a note or /help for help.',
-                              'К сожалению, я Вам ничего недавно не напоминал (нет напомненных памяток за '
-                              'последние 30 минут. Используйте сначала команду /save для сохранения памяток '
                               'или /help для получения списка доступных команд.')
 
     delay_message = ('Enter the delay period in format:\n' 
@@ -383,6 +395,12 @@ def RunCycleTimerAction():
                      'мм - 2 цифры минут.\n'
                      'Пример: "2018.09.22 15:40" или "02:30".\n'
                      'Будет повторно напомнена следующая памятка:\n"')
+
+    delay_norecent_message = ('You have no recently reminded note to delay (no notes where reminded last 30 minutes). '
+                              'Use /remind or /save command first to save a note or /help for help.',
+                              'К сожалению, я Вам ничего недавно не напоминал (нет напомненных памяток за '
+                              'последние 30 минут. Используйте сначала команду /remind или /save для сохранения '
+                              'памяток или /help для получения списка доступных команд.')
 
     delay_invalid_message = ('The entered delay does not match the format:\n'
                              '<i>YYYY.MM.DD hh:mm</i> or <i>hh:mm</i>\n'
@@ -442,8 +460,8 @@ def RunCycleTimerAction():
             if is_bot == 'false':
                 continue
 
-            # GETTING CURRENT SOURCE STATE
-            source_state = ReminderBotCSQL.CheckSourceState(source_id, db_connection)
+            # GETTING CURRENT SOURCE STATE AND TIMEZONE
+            (source_state, source_timezone) = ReminderBotCSQL.CheckSourceStateAndTimezone(source_id, db_connection)
             if source_state == -1:
                 StopCycle('->  Error checking source state: error executing through DB connection.')
                 return 1
@@ -451,7 +469,7 @@ def RunCycleTimerAction():
                 StopCycle('->  Error checking source state: more than one example of the source in DB.')
                 return 1
             if source_state == -2:
-                # ADDING SOURCE TO BD IF IT IS NEW
+                # ADDING SOURCE TO DB IF IT IS NEW
                 if ReminderBotCSQL.AddSource(source_id, db_connection, is_user, user_language) == 1:
                     StopCycle('->  Error adding a source to the DB.', db_connection)
                     return 1
@@ -473,6 +491,19 @@ def RunCycleTimerAction():
 
                 continue
 
+            # TIMEZONE COMMAND
+            if message.lower() in ('/timezone', 'timezone'):
+                answer_to_source = timezone_message[language] % source_timezone
+                if SendMessageToChatOrStop(source_id, answer_to_source, db_connection) != 0:
+                    return 1
+
+                # CHANGING SOURCE STATE TO 4 - WAITING FOR TIMEZONE INT
+                if ChangeSourceStateOrStop(source_id, db_connection, 4) != 0:
+                    return 1
+
+                continue
+
+
             # SHOW COMMAND
             if message.lower() in ('/show', 'show'):
                 # GETTING NOTES OF CURRENT SOURCE
@@ -487,8 +518,9 @@ def RunCycleTimerAction():
                     # ADDING FOUND NOTES TO THE ANSWER
                     answer_to_source = show_saved_message[language]
                     for note in notes:
-                        answer_to_source += ('\n' + str(note[0]) + '.' + str(note[1]) + '.' + str(note[2]) + ' '
-                                             + str(note[3]) + ':' + str(note[4]) + '\n"' + note[5]) + '"'
+                        note_datetime = str(datetime(note[0], note[1], note[2], note[3], note[4]))
+                        note_datetime = note_datetime[0: note_datetime.rindex(':')]
+                        answer_to_source += ('\n' + note_datetime + '\n"' + note[5]) + '"'
                         if note[6] == 1:
                             answer_to_source += show_reminded_message[language]
 
@@ -546,7 +578,7 @@ def RunCycleTimerAction():
                     continue
 
                 else:
-                    answer_to_source = delay_message[language] + str(note[6]) + '"'
+                    answer_to_source = delay_message[language] + str(note[7]) + '"'
                     if SendMessageToChatOrStop(source_id, answer_to_source, db_connection) != 0:
                         return 1
 
@@ -558,7 +590,9 @@ def RunCycleTimerAction():
 
             # TIME COMMAND
             if message.lower() in ('/time', 'time'):
-                answer_to_source = time_message[language] + str(datetime.now())
+                now_datetime = str(datetime.now())
+                now_datetime = now_datetime[0 : now_datetime.rindex('.')]
+                answer_to_source = time_message[language] + now_datetime
                 if SendMessageToChatOrStop(source_id, answer_to_source, db_connection) != 0:
                     return 1
 
@@ -637,7 +671,8 @@ def RunCycleTimerAction():
 
                     else:
                         # THE UPDATE MESSAGE IS CORRECT - SAVING NOTE TO DB
-                        if ReminderBotCSQL.AddNote(source_id, db_connection, year, month, day, hour, minute, text) != 0:
+                        if ReminderBotCSQL.AddNote(source_id, db_connection,
+                                                   year, month, day, hour, minute, source_timezone, text) != 0:
                             StopCycle('->  Error adding a note through DB connection.', db_connection)
                             return 1
 
@@ -666,7 +701,7 @@ def RunCycleTimerAction():
                     if note == 0:
                         answer_to_source = delay_notavailable_message[language]
                     else:
-                        answer_to_source = delay_success_message1[language] + note[6] + delay_success_message2[language]
+                        answer_to_source = delay_success_message1[language] + note[7] + delay_success_message2[language]
 
                 # ACQUIRING NEW TIME FOR THE NOTE TO REMIND
                 if check_result == 1:
@@ -682,7 +717,8 @@ def RunCycleTimerAction():
                     # THE UPDATE MESSAGE IS CORRECT AND HOLD DELAY TIME
                     hour = int(message[0:2])
                     minute = int(message[3:5])
-                    new_datetime = datetime.now() + timedelta(0, 0, 0, 0, minute, hour)
+                    new_datetime = (datetime.now() + timedelta(hours=source_timezone-server_timezone) +
+                                    timedelta(0, 0, 0, 0, minute, hour))
                     year = new_datetime.year
                     month = new_datetime.month
                     day = new_datetime.day
@@ -745,14 +781,15 @@ def RunCycleTimerAction():
                         hour, day, month, year = 0, 0, 0, 0
 
                     text = message
-                    remind_datetime = datetime.now() + timedelta(days=(year*365 + month*30), hours=hour, minutes=minute)
+                    remind_datetime = (datetime.now() + timedelta(hours=source_timezone-server_timezone) +
+                                       timedelta(days=(year*365 + month*30), hours=hour, minutes=minute))
                     rd_str = str(remind_datetime)
                     rd_str = rd_str[0:rd_str.rindex('.')]
                     answer_to_source = (remind_success_message[language] + rd_str + ending_message[language])
                     # THE UPDATE MESSAGE IS CORRECT - SAVING NOTE TO DB
                     if ReminderBotCSQL.AddNote(source_id, db_connection, remind_datetime.year, remind_datetime.month,
                                                remind_datetime.day, remind_datetime.hour,
-                                               remind_datetime.minute, text) != 0:
+                                               remind_datetime.minute, source_timezone, text) != 0:
                         StopCycle('->  Error adding a note through DB connection.', db_connection)
                         return 1
 
@@ -761,6 +798,36 @@ def RunCycleTimerAction():
                     if ChangeSourceStateOrStop(source_id, db_connection, 0) != 0:
                         return 1
 
+                if SendMessageToChatOrStop(source_id, answer_to_source, db_connection) != 0:
+                    return 1
+
+                continue
+
+            # AFTER TIMEZONE COMMAND
+            if source_state == 4:
+                # CHECK THE MESSAGE TO BE AN INT
+                try:
+                    new_timezone = int(message.strip())
+                except:
+                    answer_to_source = timezone_invalid_message[language]
+                    if SendMessageToChatOrStop(source_id, answer_to_source, db_connection) != 0:
+                        return 1
+
+                    continue
+
+                if new_timezone < -12 or new_timezone > 13:
+                    answer_to_source = timezone_invalid_message[language]
+                    if SendMessageToChatOrStop(source_id, answer_to_source, db_connection) != 0:
+                        return 1
+
+                    continue
+
+                # IF ENTERED INPUT IS CORRECT
+                if ReminderBotCSQL.ChangeSourceTimezone(source_id, db_connection, new_timezone) != 0:
+                    StopCycle('->  Error changing a source timezone through DB connection.', db_connection)
+                    return 1
+
+                answer_to_source = timezone_success_message[language] + ending_message[language]
                 if SendMessageToChatOrStop(source_id, answer_to_source, db_connection) != 0:
                     return 1
 
@@ -801,8 +868,10 @@ def RunCycleTimerAction():
                 language = 1
 
             remind_datetime = datetime(note[2], note[3], note[4], note[5], note[6])
-            if (datetime.now() - remind_datetime).total_seconds() > 0:
-                message_to_source = reminding_message[language] + str(remind_datetime) + '\n' + note[7]
+            if (datetime.now() + timedelta(hours=note[7]-server_timezone) - remind_datetime).total_seconds() > 0:
+                remind_datetime = str(remind_datetime)
+                remind_datetime = remind_datetime[0: remind_datetime.rindex(':')]
+                message_to_source = reminding_message[language] + str(remind_datetime) + '\n' + note[8]
                 if SendMessageToChatOrStop(source_id, message_to_source, db_connection) != 0:
                     return 1
 
@@ -851,6 +920,7 @@ if __name__ == '__main__':
                   '-shows   -  prints the current content of Sources table of "' + db_filename + '" database,\n'
                   '-shown   -  prints the current content of Notes table of "' + db_filename + '" database,\n'
                   '-stat    -  prints statistics on total sources and notes ever registered.\n')
+
         elif str(sys.argv[1]).lower() in ('-shows', 'shows'):
             ShowAllSource()
 
@@ -892,7 +962,7 @@ if __name__ == '__main__':
             elif command.lower() in ('-test', 'test'):
                 TestBotToken()
 
-            elif command.lower()[0: command.index(' ')] in ('-delay', 'delay'):
+            elif command.find(' ') != -1 and command.lower()[0: command.index(' ')] in ('-delay', 'delay'):
                 if command[command.rindex(' ') + 1] == '-':
                     print('->  Error in entered cycle period - negative value.')
                     continue
@@ -901,6 +971,8 @@ if __name__ == '__main__':
                 except:
                     print('->  Error converting entered number to cycle period.')
                     continue
+
+                print('Cycle period changed to ' + str(cycle_period) + ' seconds.')
 
             elif command.lower() in ('-exit', 'exit', '-quit', 'quit') or stop_cycle:
                 if main_cycle.is_alive():

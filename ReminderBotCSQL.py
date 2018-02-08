@@ -1,17 +1,21 @@
 import sqlite3
+import time
 from operator import itemgetter
-from datetime import (datetime)
+from datetime import (datetime, timedelta)
 
 # IF THIS .PY FILE WAS RUN BY MISTAKE
 if __name__ == '__main__':
     print('This .py file is additional and should not be executed. Execute "ReminderBotC.py" instead. For help use -help argument.')
 
-def CheckIfOlderThen30Minutes(year, month, day, hour, minute):
+def CheckIfOlderThenXMinutes(delay, year, month, day, hour, minute, tzone):
     """Checks if encrypted in <year.month.day hour:minute> datetime is older then 30 minutes ago - returns 1 if older"""
     note_datetime = datetime(year, month, day, hour, minute)
-    now_time = datetime.today()
+    ts = time.time()
+    server_tz = round((datetime.fromtimestamp(ts) -
+                  datetime.utcfromtimestamp(ts)).total_seconds()/3600)
+    now_time = datetime.now() + timedelta(hours=tzone-server_tz)
     time_delta = round((now_time - note_datetime).total_seconds() / 60)
-    if time_delta <= 30:
+    if time_delta <= delay:
         return False
 
     return True
@@ -34,12 +38,12 @@ def CloseConnectionToDB(db_connection):
     return 0
 
 
-def CheckSourceState(source_id, db_connection):
+def CheckSourceStateAndTimezone(source_id, db_connection):
     """Checking the state of a source with <source_id> in DB with db_connection"""
     try:
         # ACQUIRING SOURCE STATE
         cursor = db_connection.cursor()
-        cursor.execute('''SELECT STATE FROM Sources WHERE SOURCE=?''', (str(source_id),))
+        cursor.execute('''SELECT STATE, TZONE FROM Sources WHERE SOURCE=?''', (str(source_id),))
     except sqlite3.Error as e:
         print('Error searching source through DB connection: ' + e.args[0])
         return -1
@@ -51,7 +55,7 @@ def CheckSourceState(source_id, db_connection):
     if len(states) > 1:
         return -3
 
-    return states[0][0]
+    return states[0]
 
 
 def GetSourceLanguage(source_id, db_connection):
@@ -83,8 +87,8 @@ def AddSource(source_id, db_connection, is_user, language='eng'):
     try:
         # ADDING NEW VALUE
         cursor = db_connection.cursor()
-        cursor.execute('''INSERT INTO Sources (TYPE, SOURCE, STATE, LANG) VALUES (?, ?, ?, ?)''',
-                       (source_type, str(source_id), 0, language))
+        cursor.execute('''INSERT INTO Sources (TYPE, SOURCE, STATE, LANG, TZONE) VALUES (?, ?, ?, ?, ?)''',
+                       (source_type, str(source_id), 0, language, 0))
         cursor.execute('''UPDATE Statistics SET TOTALS = (SELECT TOTALS FROM Statistics WHERE ID = 1) + 1 WHERE ID=1''')
     except sqlite3.Error as e:
         print('Error adding a source through DB connection: ' + e.args[0])
@@ -119,6 +123,19 @@ def ChangeSourceState(source_id, db_connection, new_state):
     return 0
 
 
+def ChangeSourceTimezone(source_id, db_connection, new_timezone):
+    """ Changing the source <source_id> timezone to <new_timezone>"""
+    try:
+        # CHANGING TIMEZONE VALUE
+        cursor = db_connection.cursor()
+        cursor.execute('''UPDATE Sources SET TZONE = ? WHERE SOURCE = ?''', (new_timezone, str(source_id)))
+    except sqlite3.Error as e:
+        print('Error changing a source timezone through DB connection: ' + e.args[0])
+        return 1
+
+    return 0
+
+
 def GetAllNotesOfSource(source_id, db_connection):
     """Getting all notes of the source <source_id> througn <db_connection>"""
     try:
@@ -130,7 +147,19 @@ def GetAllNotesOfSource(source_id, db_connection):
         return -1
 
     notes = cursor.fetchall()
-    notes.sort(key=itemgetter(0, 1, 2, 3, 4), reverse=False)
+    new_notes = []
+    old_notes = []
+    for note in notes:
+        if note[6] == 0:
+            new_notes.append(note)
+        else:
+            old_notes.append(note)
+
+    # SORTING FROM OLDER TO NEWER
+    new_notes.sort(key=itemgetter(0, 1, 2, 3, 4), reverse=False)
+    # SORTING FROM NEWER TO OLDER
+    old_notes.sort(key=itemgetter(0, 1, 2, 3, 4), reverse=True)
+    notes = new_notes + old_notes
     return notes
 
 
@@ -139,7 +168,7 @@ def GetLastRemindedNoteOfSource(source_id, db_connection):
     try:
         # ACQUIRING REMINDED NOTES OF A SOURCE
         cursor = db_connection.cursor()
-        cursor.execute('''SELECT ID, YEAR, MONTH, DAY, HOUR, MINUTE, TEXT FROM Notes WHERE SOURCE=? AND REMINDED=1''', (str(source_id),))
+        cursor.execute('''SELECT ID, YEAR, MONTH, DAY, HOUR, MINUTE, TZONE, TEXT FROM Notes WHERE SOURCE=? AND REMINDED=1''', (str(source_id),))
     except sqlite3.Error as e:
         print('Error getting reminded notes of a source through DB connection: ' + e.args[0])
         return -1
@@ -150,17 +179,18 @@ def GetLastRemindedNoteOfSource(source_id, db_connection):
         return -2
     # REMOVING NOTES, REMINDED LONGER THAN 30 MINUTES AGO
     for note in notes:
-        if not CheckIfOlderThen30Minutes(note[1], note[2], note[3], note[4], note[5]):
+        if not CheckIfOlderThenXMinutes(30, note[1], note[2], note[3], note[4], note[5], note[6]):
             return note
 
 
 
-def AddNote(source_id, db_connection, year, month, day, hour, minute, text):
+def AddNote(source_id, db_connection, year, month, day, hour, minute, tzone, text):
     """Adding a note with date, time and text to the DB through <db_connection>"""
     try:
         cursor = db_connection.cursor()
-        cursor.execute('''INSERT INTO Notes (SOURCE, YEAR, MONTH, DAY, HOUR, MINUTE, TEXT, REMINDED) VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                       (str(source_id), year, month, day, hour, minute, text, 0))
+        cursor.execute('''INSERT INTO Notes (SOURCE, YEAR, MONTH, DAY, HOUR, MINUTE, TZONE, TEXT, REMINDED) 
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                       (str(source_id), year, month, day, hour, minute, tzone, text, 0))
         cursor.execute('''UPDATE Statistics SET TOTALN = (SELECT TOTALN FROM Statistics WHERE ID = 1) + 1 WHERE ID=1''')
     except sqlite3.Error as e:
         print('Error saving note through DB connection: ' + e.args[0])
@@ -257,7 +287,7 @@ def GetNotesToRemind(db_connection):
     try:
         # ACQUIRING NOTES
         cursor = db_connection.cursor()
-        cursor.execute('''SELECT ID, SOURCE, YEAR, MONTH, DAY, HOUR, MINUTE, TEXT FROM Notes WHERE REMINDED=0''')
+        cursor.execute('''SELECT ID, SOURCE, YEAR, MONTH, DAY, HOUR, MINUTE, TZONE, TEXT FROM Notes WHERE REMINDED=0''')
     except sqlite3.Error as e:
         print('Error getting notes through DB connection: ' + e.args[0])
         return -1
@@ -288,7 +318,7 @@ def RemoveOldRemindedNotes(db_connection):
     try:
         # ACQUIRING NOTES
         cursor = db_connection.cursor()
-        cursor.execute('''SELECT ID, YEAR, MONTH, DAY, HOUR, MINUTE FROM Notes WHERE REMINDED=1''')
+        cursor.execute('''SELECT ID, YEAR, MONTH, DAY, HOUR, MINUTE, TZONE FROM Notes WHERE REMINDED=1''')
     except sqlite3.Error as e:
         print('Error getting old notes through DB connection: ' + e.args[0])
         return -1
@@ -298,9 +328,10 @@ def RemoveOldRemindedNotes(db_connection):
     if notes is not None:
         notes_id = ''
         for note in notes:
-            if CheckIfOlderThen30Minutes(note[1], note[2], note[3], note[4], note[5]):
-                notes_id+= str(note[0]) + ', '
+            if CheckIfOlderThenXMinutes(30, note[1], note[2], note[3], note[4], note[5], note[6]):
+                notes_id += str(note[0]) + ', '
                 count += 1
+
         if len(notes_id) > 0:
             notes_id = notes_id[0:-2]
             try:
@@ -310,12 +341,6 @@ def RemoveOldRemindedNotes(db_connection):
                 return -1
 
     return count
-
-
-def SortDateTimeSource(note):
-    """Returning a string with the source id first and a time number (in minutes), representing datetime
-    note tupple: ID, SOURCE, YEAR, MONTH, DAY, HOUR, MINUTE, TEXT"""
-    return str(note[0]) + str((((note[2] * 12 + note[3]) * 31 + note[4]) * 24 + note[5]) * 60 + note[6])
 
 
 def GetStats(db_file_name, isolation_level=None):
